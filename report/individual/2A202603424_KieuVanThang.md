@@ -52,11 +52,21 @@ precision  recall  F1 (test)  F1 (SUB 40)  \
 
 ## 3. Dự đoán và thực tế
 
-*Chọn 3 dự đoán `predict(...)` lệch nhiều nhất so với kết quả. Mỗi cái: bạn đoán gì, ra gì, vì sao lệch.*
+1. **So sánh LLM nhỏ và lớn (`llm_models`).** Em đoán model lớn có F1 cao hơn model nhỏ khoảng 0.05, tốn gấp 2.5 lần và cả hai ngang hoặc nhỉnh hơn Encoder + LogReg. Thực tế, LLM nhỏ đạt F1 SUB **0.824**, LLM lớn là **0.000** với **40/40 output không hợp lệ**; Encoder + LogReg đạt **0.919**. Vì toàn bộ output của model lớn không hợp lệ, số 0 này phản ánh lỗi ở lần gọi/đọc output trong thí nghiệm, không đủ để kết luận model lớn kém hơn về năng lực phân loại.
+
+2. **Tìm kiếm theo nghĩa (`emb_search`).** Em đoán câu “you have been selected to receive a complimentary holiday, reply now to claim” gần với tin ham. Kết quả thực tế: cả **6 hàng xóm gần nhất đều là spam**, với cosine từ **0.513 đến 0.563**. Tôi đã quá dựa vào việc câu không có các từ khóa spam quen thuộc; embedding vẫn bắt được ngữ nghĩa mời nhận kỳ nghỉ, yêu cầu phản hồi và nhận thưởng.
+
+3. **Bỏ ReLU (`dl_relu`).** Em đoán mạng sẽ trở thành logistic regression và F1 giảm về gần mức Logistic Regression. Hai lớp Linear liên tiếp đúng là biểu diễn một phép biến đổi tuyến tính, nhưng F1 thực tế của mạng không ReLU là **0.932**, cao hơn F1 **0.871** của BoW + LogReg; MLP có ReLU đạt **0.931**. Tương đương về dạng hàm không đảm bảo hai lần huấn luyện tìm được cùng nghiệm hoặc cùng dự đoán: cấu hình tối ưu hóa và quá trình học khác nhau, nên kết quả thực nghiệm không giảm như tôi dự đoán.
 
 ## 4. Phân tích 50 case khó
 
-*Model nào tụt nhiều nhất, ở nhóm case nào? Nêu 2 case cụ thể và cơ chế khiến model sai.*
+Trong các model có số F1 test thường đo riêng, **BoW + MLP tụt nhiều nhất**: F1 SUB giảm từ **0.919** xuống **0.368** trên 50 case khó (giảm **0.551**). Model này đặc biệt yếu ở nhóm **spam giọng tự nhiên (0%)**, **thao túng/lừa đảo (25%)** và **né từ khóa (17%)**. BoW + MLP dựa vào các từ và tổ hợp từ đã học, không thật sự hiểu ý định; vì vậy tin nhắn lịch sự, giống hội thoại bình thường hoặc viết lệch từ khóa dễ bị bỏ sót.
+
+Hai ví dụ model phân loại sai:
+- **Case #12:** “hi there, sorry to bother you, my friend gave me your number, I'm new in town and looking for someone to chat with, check my profile at meetlocal.club” là spam dụ người nhận vào trang hẹn hò. Cách mở đầu thân thiện và thiếu từ khóa quảng cáo quen thuộc khiến đặc trưng BoW không đủ mạnh để nhận ra ý đồ.
+- **Case #13:** “Hope you're well! Quick reminder that your photos from the event are ready, view & order prints here: snap-prints.co/r/88” giả dạng thông báo ảnh sự kiện. Cụm từ quen thuộc, vô hại lấn át dấu hiệu bán hàng nằm ở lời mời đặt ảnh và liên kết.
+
+Lưu ý: bảng notebook gán F1 SUB **0.824** cho 4d bằng cách dùng kết quả của **4a**, không phải phép đo riêng của prompt phòng thủ trên SUB; vì vậy không dùng dòng này để kết luận 4d tụt bao nhiêu so với chính nó. Riêng trên hard-eval, 4d đạt F1 **0.000**, còn BoW + MLP là model tụt nhiều nhất trong các cặp so sánh cùng cấu hình.
 
 ## 5. Thử thách cá nhân
  Đề #3: DL · Đổi lớp ẩn MLP thành 4 và 512 nơ-ron. Báo số tham số, F1 test, thời gian train. Khi nào nên chọn mạng nhỏ?
@@ -65,8 +75,13 @@ Tính toán số lượng tham số:Trường hợp hidden = 4:Lớp 1:  (2000×
 
 ## 6. Phương án cho sản phẩm thật
 
-*Với yêu cầu p95 < 50 ms/tin cho 10 triệu SMS/ngày: chọn phương án nào, dẫn số liệu nào, chấp nhận đánh đổi gì.*
+Em chọn **MiniLM + MLP head (3c)** vì cân bằng tốt giữa chất lượng và độ trễ: F1 test **0.950**, F1 trên SUB 40 tin **0.923**, p95 **10.855 ms/tin** (thấp hơn giới hạn 50 ms), và tốc độ đo theo lô khoảng **1.315 tin/s**. Mức 10 triệu tin/ngày tương đương trung bình khoảng **116 tin/s**, nhưng lưu lượng thực tế có giờ cao điểm nên cần kiểm thử tải và triển khai đủ replica để giữ p95 dưới 50 ms; số đo trong notebook chỉ là tham khảo trên môi trường Colab, không bảo đảm hiệu năng production.
+
+Đánh đổi là phải chạy bước mã hóa MiniLM cho từng tin, nên tốn CPU/GPU và tài nguyên vận hành hơn các mô hình BoW; tốc độ thực tế còn phụ thuộc phần cứng và mức tải đồng thời. Đổi lại, mô hình đạt F1 cao nhất trong các phương án đã đo và có khoảng đệm độ trễ đáng kể. Nếu ưu tiên chi phí và thông lượng hơn, BoW + MLP cũng đạt p95 **2.319 ms/tin** và khoảng **20.838 tin/s**, nhưng F1 test thấp hơn (**0.931**); chênh F1 SUB chỉ **0.004**, nên cần đánh giá thêm trên dữ liệu lớn, đại diện trước khi quyết định đánh đổi chất lượng để tiết kiệm tài nguyên.
+
 
 ## 7. AI log và điều đã học
 
-*Mỗi lần dùng AI: hỏi gì, nhận gì, bạn sửa gì. Sau đó 2–3 câu: điều bạn hiểu ra hôm nay mà trước đó chưa hiểu.*
+**AI log:** Em nhờ AI đối chiếu dự đoán với kết quả, phân tích các case khó và lập luận chọn mô hình cho sản phẩm. AI giúp tổng hợp số liệu; em kiểm tra lại output notebook, sửa các nhận định chưa khớp và ghi rõ giới hạn khi 40/40 output của LLM lớn không hợp lệ.
+
+**Điều đã học:** Em hiểu rằng điểm F1 trên tập test thông thường chưa đảm bảo mô hình xử lý tốt các kiểu spam mới hoặc được viết tự nhiên. Khi giải thích kết quả, cần kiểm tra cả dữ liệu và output thí nghiệm, đồng thời cân nhắc chất lượng, độ trễ và tài nguyên triển khai.
